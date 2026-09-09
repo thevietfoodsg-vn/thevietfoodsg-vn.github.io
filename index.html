@@ -227,16 +227,16 @@ main{padding:14px 16px 0}
 dialog{
   border:0; padding:0; background:var(--surface); color:var(--ink);
   border-radius:18px 18px 0 0; width:100%; max-width:760px;
-  margin:auto auto 0; max-height:92vh;
+  margin:auto auto 0; max-height:92vh; max-height:92dvh;
 }
 dialog::backdrop{background:rgba(10,18,15,.55)}
 .dlg-h{position:sticky; top:0; background:var(--surface); padding:16px 18px 12px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; z-index:2}
 .dlg-h h3{margin:0; font-size:16px; font-weight:700; flex:1}
-#dlgform{display:flex; flex-direction:column; max-height:92vh}
+#dlgform{display:flex; flex-direction:column; max-height:92vh; max-height:92dvh}
 .dlg-h, .dlg-f{flex:none}
 .dlg-b{padding:16px 18px; overflow-y:auto; flex:1 1 auto; min-height:0; overscroll-behavior:contain}
 .dlg-f{position:sticky; bottom:0; background:var(--surface); padding:12px 18px calc(14px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); display:flex; gap:8px}
-.dlg-f .btn{flex:1; min-width:0; white-space:nowrap}
+.dlg-f .btn{flex:1; min-width:0; white-space:nowrap; min-height:46px}
 /* thanh dưới có 3 nút: 2 nút phụ nhỏ lại, nút chính (nút cuối) to gấp đôi */
 .dlg-f .btn.ghost{flex:0 1 auto; padding-left:10px; padding-right:10px; font-size:13.5px}
 .dlg-f .btn:last-child{flex:2 1 auto}
@@ -2352,15 +2352,31 @@ async function billImage(o){
 }
 
 /* hiện ảnh bill để nhân viên nhấn giữ rồi lưu về máy */
-function showBillImage(dataUrl, o){
+function showBillImage(dataUrl, o, blob, fname){
+  /* iPhone: cách chắc ăn nhất là mở bảng Chia sẻ rồi bấm "Lưu vào Ảnh" */
+  let canShare = false, file = null;
+  try{
+    if(blob && window.File && navigator.canShare){
+      file = new File([blob], fname || ("Bill-" + orderCode(o) + ".png"), {type:"image/png"});
+      canShare = navigator.canShare({files:[file]});
+    }
+  }catch(e){ canShare = false; }
+
+  const acts = [{label:"Xong", cls:"ghost", fn:null}];
+  if(canShare) acts.push({label:"📤 Lưu / Gửi ảnh", cls:"", fn:()=>{
+    navigator.share({files:[file]}).catch(()=>{});
+    return false;
+  }});
+
   openDialog("Ảnh bill " + orderCode(o), `
     <div class="note" style="margin-bottom:12px;border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)">
-      <b>📱 Trên điện thoại:</b> nhấn giữ vào ảnh dưới → chọn <b>"Lưu vào ảnh"</b> / <b>"Tải hình ảnh"</b>, rồi gửi cho khách.<br>
-      <b>💻 Trên máy tính:</b> bấm chuột phải vào ảnh → <b>"Lưu hình ảnh thành..."</b>
+      ${canShare
+        ? '<b>📱 Bấm 📤 Lưu / Gửi ảnh</b> ở thanh dưới → chọn <b>"Lưu vào Ảnh"</b> để cất máy, hoặc chọn thẳng Zalo / WhatsApp / Messenger để gửi khách liền.'
+        : '<b>📱 Điện thoại:</b> nhấn giữ vào ảnh dưới → <b>"Lưu vào ảnh"</b>.<br><b>💻 Máy tính:</b> bấm chuột phải vào ảnh → <b>"Lưu hình ảnh thành..."</b>'}
     </div>
     <img src="${dataUrl}" alt="Bill ${esc(orderCode(o))}"
       style="width:100%;border:1px solid var(--line);border-radius:12px;display:block">
-  `, [{label:"Xong", cls:"", fn:null}]);
+  `, acts);
 }
 
 function canvasBlob(cv){
@@ -2371,16 +2387,13 @@ function canvasBlob(cv){
    chứ không gắn thẳng vào nút — iPhone hay làm mất hàm gắn thẳng khi hộp
    thoại vẽ lại, khiến bấm nút không ăn gì cả.                              */
 let BILL_NOW = null, BILL_BUSY = false;
-document.addEventListener("click", function(e){
-  const t = e.target && e.target.closest ? e.target.closest("#b_img") : null;
-  if(!t || !BILL_NOW || BILL_BUSY) return;
-  e.preventDefault();
-  BILL_BUSY = true;
-  saveBillImage(BILL_NOW, t).then(()=>{ BILL_BUSY = false; }, ()=>{ BILL_BUSY = false; });
-}, true);
 
 async function saveBillImage(o, btn){
+  if(!o) o = BILL_NOW;
   if(!o){ toast("Chưa mở bill nào"); return; }
+  if(BILL_BUSY) return;               /* chống bấm hai lần ra hai ảnh */
+  BILL_BUSY = true;
+  const lbl = btn ? btn.textContent : "";
   if(btn){ btn.disabled = true; btn.textContent = "Đang tạo ảnh…"; }
   try{
     const cv = await billImage(o);
@@ -2394,12 +2407,15 @@ async function saveBillImage(o, btn){
       toast("Đã lưu ảnh bill — gửi cho khách được rồi");
       return;
     }
-    /* không tải thẳng được thì hiện ảnh ra, nhấn giữ để lưu */
+    /* không tải thẳng được thì hiện ảnh ra, nhấn giữ để lưu.
+       iPhone: ảnh dạng data: dài vài MB hay không chịu hiện — dùng blob trước. */
     let url = "";
-    try{ url = cv.toDataURL("image/png"); }catch(e){ url = ""; }
-    if((!url || url.length < 200) && blob && window.URL && URL.createObjectURL) url = URL.createObjectURL(blob);
-    if(!url || url.length < 200){ toast("Máy không tạo được ảnh (bill quá dài) — dùng nút In / Lưu PDF hoặc Chép bill"); return; }
-    showBillImage(url, o);
+    if(blob && window.URL && URL.createObjectURL){
+      try{ url = URL.createObjectURL(blob); }catch(e){ url = ""; }
+    }
+    if(!url){ try{ url = cv.toDataURL("image/png"); }catch(e){ url = ""; } }
+    if(!url || url.length < 30){ toast("Máy không tạo được ảnh — dùng nút 🖨 In hoặc 📋 Chép"); return; }
+    showBillImage(url, o, blob, name);
   }catch(err){
     const code = err && err.code;
     if(code === "declined") toast("Chưa lưu — bấm đồng ý khi app hỏi");
@@ -2407,7 +2423,8 @@ async function saveBillImage(o, btn){
     else if(code === "too_large") toast("Ảnh lớn quá");
     else toast("Không lưu được ảnh: " + ((err && err.message) || "lỗi lạ") + " — dùng nút Chép bill");
   }finally{
-    if(btn){ btn.disabled = false; btn.textContent = "💾 Lưu ảnh"; }
+    BILL_BUSY = false;
+    if(btn){ btn.disabled = false; btn.textContent = lbl || "💾 Lưu ảnh bill"; }
   }
 }
 
@@ -2418,32 +2435,30 @@ function billDialog(id){
     + '<button type="button" class="lng'+(billLang(o)==="vi"?" on":"")+'" data-lang="vi">🇻🇳 Tiếng Việt</button>'
     + '<button type="button" class="lng'+(billLang(o)==="en"?" on":"")+'" data-lang="en">🇸🇬 English</button>'
     + '</div>'
+    + '<button type="button" class="btn" id="b_img" style="width:100%;margin-bottom:10px">💾 Lưu ảnh bill</button>'
     + '<div class="note" style="margin-bottom:12px;border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)">'
-    + 'Bấm <b>💾 Lưu ảnh</b> ở thanh dưới cùng màn hình → ảnh hiện ra → <b>nhấn giữ vào ảnh</b> → <b>Lưu vào ảnh</b> → gửi cho khách.</div>'
+    + 'Bấm <b>💾 Lưu ảnh bill</b> ngay trên đây → ảnh hiện ra → <b>nhấn giữ vào ảnh</b> → <b>Lưu vào ảnh</b> → gửi cho khách.</div>'
     + '<div id="billbox">' + billHTML(o) + '</div>'
     + '<div class="note" style="margin-top:10px">Muốn gửi bằng chữ thì bấm <b>Chép bill</b>. Muốn in ra giấy thì bấm <b>In</b>. Hai nút đó cũng ở thanh dưới.</div>', [
-    {label:"📋 Chép", cls:"ghost", fn:()=>{
+    {label:"📋 Chép bill", cls:"ghost", fn:()=>{
       const t = billText(o);
       if(navigator.clipboard) navigator.clipboard.writeText(t).then(()=>toast("Đã chép bill — dán vào chat gửi khách"), ()=>toast("Không chép được"));
       else toast("Không chép được");
       return false;
     }},
-    {label:"🖨 In", cls:"ghost", fn:()=>{
+    {label:"🖨 In / Lưu PDF", cls:"", fn:()=>{
       const pa = document.getElementById("printarea");
       pa.innerHTML = billHTML(o);
       try{ window.print(); }
       catch(e){ toast("Trình duyệt chặn in — dùng nút Chép bill"); }
-      return false;
-    }},
-    {label:"💾 Lưu ảnh", cls:"", fn:()=>{
-      const fb = document.querySelector('#dlgFoot [data-a="2"]');
-      saveBillImage(o, fb);
       return false;
     }}
   ]);
   /* Ghi nhớ đơn đang mở bill — để nút Lưu ảnh còn chạy được kể cả khi
      hộp thoại vẽ lại (đổi tiếng Việt / English) làm mất hàm gắn trực tiếp. */
   BILL_NOW = o;
+  const bimg = document.getElementById("b_img");
+  if(bimg) bimg.onclick = ()=> saveBillImage(o, bimg);
   document.querySelectorAll("[data-lang]").forEach(btn=>{
     btn.onclick = ()=>{
       o.lang = btn.dataset.lang;
@@ -3475,6 +3490,26 @@ function openDialog(title, body, actions){
   const d = $("#dlg");
   if(!d.open) d.showModal();
   $("#dlgBody").scrollTop = 0;
+  fitDialog();
+}
+/* iPhone: đơn vị vh tính cả phần bị thanh Safari che, nên thanh nút dưới cùng
+   bị đẩy xuống ngoài màn hình — thấy nút mà bấm không tới. Đo chiều cao THẬT
+   rồi ép vào hộp thoại.                                                      */
+function fitDialog(){
+  const d = document.getElementById("dlg"); if(!d || !d.open) return;
+  const vv = window.visualViewport;
+  const h = Math.round(((vv && vv.height) || window.innerHeight || 0) * 0.92);
+  if(h > 200){
+    d.style.maxHeight = h + "px";
+    const f = document.getElementById("dlgform");
+    if(f) f.style.maxHeight = h + "px";
+  }
+}
+window.addEventListener("resize", fitDialog);
+window.addEventListener("orientationchange", ()=> setTimeout(fitDialog, 250));
+if(window.visualViewport){
+  window.visualViewport.addEventListener("resize", fitDialog);
+  window.visualViewport.addEventListener("scroll", fitDialog);
 }
 function closeDialog(){ const d=$("#dlg"); if(d.open) d.close(); }
 $("#dlgform").addEventListener("submit", e=>{ e.preventDefault(); closeDialog(); });
