@@ -2362,7 +2362,20 @@ function canvasBlob(cv){
   return new Promise(res=> cv.toBlob(b=> res(b), "image/png"));
 }
 
+/* Đơn đang mở bill. Nút "Lưu ảnh bill" bắt sự kiện ở cấp hộp thoại (bên dưới)
+   chứ không gắn thẳng vào nút — iPhone hay làm mất hàm gắn thẳng khi hộp
+   thoại vẽ lại, khiến bấm nút không ăn gì cả.                              */
+let BILL_NOW = null, BILL_BUSY = false;
+document.addEventListener("click", function(e){
+  const t = e.target && e.target.closest ? e.target.closest("#b_img") : null;
+  if(!t || !BILL_NOW || BILL_BUSY) return;
+  e.preventDefault();
+  BILL_BUSY = true;
+  saveBillImage(BILL_NOW, t).then(()=>{ BILL_BUSY = false; }, ()=>{ BILL_BUSY = false; });
+}, true);
+
 async function saveBillImage(o, btn){
+  if(!o){ toast("Chưa mở bill nào"); return; }
   if(btn){ btn.disabled = true; btn.textContent = "Đang tạo ảnh…"; }
   try{
     const cv = await billImage(o);
@@ -2417,8 +2430,9 @@ function billDialog(id){
       return false;
     }}
   ]);
-  const bimg = document.getElementById("b_img");
-  if(bimg) bimg.onclick = ()=> saveBillImage(o, bimg);
+  /* Ghi nhớ đơn đang mở bill — để nút Lưu ảnh còn chạy được kể cả khi
+     hộp thoại vẽ lại (đổi tiếng Việt / English) làm mất hàm gắn trực tiếp. */
+  BILL_NOW = o;
   document.querySelectorAll("[data-lang]").forEach(btn=>{
     btn.onclick = ()=>{
       o.lang = btn.dataset.lang;
