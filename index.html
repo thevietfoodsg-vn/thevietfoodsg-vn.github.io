@@ -954,6 +954,8 @@ const SHIP_NAME_RE = /^(?:ship|phi\s*ship|phi\s*giao|phi\s*giao\s*hang|giao\s*ha
 /* một mẩu chữ có giá → một dòng món */
 function parseItemSeg(seg){
   let s = String(seg||"").replace(/^[-•*+\s]+/, "").trim();
+  /* bỏ số thứ tự đầu dòng: "1. 2 Cơm Tấm $36" → "2 Cơm Tấm $36" */
+  s = s.replace(/^\d{1,2}\s*[.)]\s+(?=\S)/, "").trim();
   if(!s || NOT_ITEM_RE.test(s)) return null;
   let note = "";
   s = s.replace(/[\(\[]([^\)\]]*)[\)\]]/g, function(_, g){ note = (note ? note + " " : "") + String(g).trim(); return " "; });
@@ -964,6 +966,11 @@ function parseItemSeg(seg){
   let qty = 0;
   const q = s.match(/^(\d+(?:[.,]\d+)?)\s*[x×]?\s+(.+)$/);
   if(q){ qty = num(q[1]); s = q[2].trim(); }
+  /* số lượng viết đuôi: "Cơm Tấm x2" */
+  if(!qty){
+    const q2 = s.match(/^(.*\p{L}.*?)\s*[x×]\s*(\d+(?:[.,]\d+)?)$/u);
+    if(q2){ qty = num(q2[2]); s = q2[1].trim(); }
+  }
   if(!s || !/\p{L}/u.test(s)) return null;
   if(SHIP_NAME_RE.test(norm(s).replace(/\s+/g, " ")))
     return {name:"Phí giao hàng", qty:1, unit:"đơn", price:pr.value, note:note};
@@ -971,13 +978,22 @@ function parseItemSeg(seg){
   const nm = su.name.charAt(0).toUpperCase() + su.name.slice(1);
   return {name:nm, qty: qty || 1, unit:su.unit, price:pr.value, note:note};
 }
-/* "2 Cơm Tấm 36$ + 2 canh khổ qua 20$ + 10$ Ship" → 3 món riêng */
+/* "2 Cơm Tấm 36$ + 2 canh khổ qua 20$ + 10$ Ship" → 3 món riêng
+   Tách cả dấu +, dấu phẩy và chữ "và" — nhưng CHỈ khi tách ra có từ 2 giá trở lên,
+   để không cắt nhầm ghi chú hay địa chỉ.                                        */
 function splitSegs(line){
-  const parts = String(line||"").split(/\s*\+\s*/);
+  const parts = String(line||"").split(/\s*\+\s*|\s*,\s*|\s+v[aà]\s+/i);
   if(parts.length < 2) return [line];
   let n = 0; parts.forEach(p=>{ if(hasPrice(p)) n++; });
   return n >= 2 ? parts : [line];
 }
+/* dòng chỉ có mỗi con số tiền: "$59.9" · "59,9" · "59.9$" */
+function isPriceOnly(s){
+  return /^\s*(?:s\s*)?[\$₫]?\s*\d+(?:[.,]\d{1,3})?\s*(?:(?:s\s*)?[\$₫]|sgd|usd)?\s*$/i.test(String(s||""))
+         && /\d/.test(String(s||""));
+}
+/* dòng có nhãn (sđt, đ/c, ngày giao…) — không phải tên món */
+const LABEL_RE = /^(?:s[đd]t|so\s*dien|số\s*điện|phone|tel|hp|[đd]\s*t\b|mobile|contact|[đd]\s*\/?\s*c\b|địa\s*chỉ|dia\s*chi|address|addr|ngay|ngày|order|deliver|ship|phí|phi|free\s*?ship|đã|da\s|chưa|c[oọ]c|deposit|t[oổ]ng|total|subtotal|grand|th[aà]nh\s*ti[eề]n|paynow|pay\s*now)/i;
 
 /* Đọc nguyên tin nhắn đặt hàng của nhân viên.
    Nhận mẫu:  1. Tên - MT / Sđt : ... / Đ/c : ... / 1 món $55,9 (ghi chú)
@@ -993,8 +1009,21 @@ function parseOrderMsg(txt){
   if(/pay\s*now|paynow/i.test(all)) out.payMethod = "PayNow";
   else if(/chuy[eể]n\s*kho[aả]n|\bck\b|bank|transfer|banking/i.test(all)) out.payMethod = "Chuyển khoản";
   else if(/ti[eề]n\s*m[aặ]t|\bcash\b|\bcod\b/i.test(all)) out.payMethod = "Tiền mặt";
-  String(txt||"").split(/\r?\n/).forEach(line0=>{
-    let line = line0.trim();
+  /* ---- GHÉP GIÁ Ở DÒNG DƯỚI VÀO TÊN MÓN ----
+     "1 thùng sữa Vinamilk có đường loại túi"
+     "$59.9"                                   → một món, giá 59.9        */
+  const src = String(txt||"").split(/\r?\n/);
+  const rows = [];
+  for(let i = 0; i < src.length; i++){
+    const cur = String(src[i]).trim(), nxt = i + 1 < src.length ? String(src[i+1]).trim() : "";
+    if(nxt && isPriceOnly(nxt) && /\p{L}/u.test(cur) && !hasPrice(cur)
+       && !LABEL_RE.test(cur) && !NOT_ITEM_RE.test(cur)){
+      rows.push(cur + " " + nxt); i++; continue;
+    }
+    rows.push(src[i]);
+  }
+  rows.forEach(line0=>{
+    let line = String(line0).trim();
     line = line.replace(/^(\d+(?:[.,]\d+)?)(kg|g|gr|ml|l)\b/i, "$1 $2 ");
     if(!line || /^[-–—=_*·.]{2,}$/.test(line)){ addrMode = false; return; }
     let m;
@@ -1083,6 +1112,14 @@ function parseOrderMsg(txt){
     if(!out.customer && (m = line.match(/^(?:tên|ten|khách|khach|name|kh)\s*[:.\-]\s*(.+)$/i))){
       const s = splitAgent(m[1]); out.customer = s.name; if(s.agent && !out.agent) out.agent = s.agent;
       addrMode = false; return;
+    }
+    /* món ghi thiếu giá: "2 canh khổ qua" → vẫn nhận thành món, giá 0 để nhân viên điền
+       (thà để nhân viên gõ giá còn hơn nuốt mất món khách đã đặt) */
+    if(!addrMode && !LABEL_RE.test(line)
+       && /^(?:[-•*]\s*)?\d+(?:[.,]\d+)?\s+\p{L}{2}/u.test(line)
+       && !/\d{1,2}\s*[\/\-.]\s*\d{1,2}\s*[\/\-.]\s*\d{2}/.test(line)){
+      const g = parseItemSeg(line + " $0");
+      if(g){ out.lines.push(g); return; }
     }
     if(addrMode){ out.address = (out.address + " " + line).trim(); return; }
     rest.push(line);
