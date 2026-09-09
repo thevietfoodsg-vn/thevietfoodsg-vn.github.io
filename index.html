@@ -989,8 +989,13 @@ function splitSegs(line){
 }
 /* dòng chỉ có mỗi con số tiền: "$59.9" · "59,9" · "59.9$" */
 function isPriceOnly(s){
-  return /^\s*(?:s\s*)?[\$₫]?\s*\d+(?:[.,]\d{1,3})?\s*(?:(?:s\s*)?[\$₫]|sgd|usd)?\s*$/i.test(String(s||""))
-         && /\d/.test(String(s||""));
+  const t = String(s||"").trim();
+  if(!t) return false;
+  if(/^(?:s\s*)?[\$₫]\s*\d+(?:[.,]\d{1,3})?$/i.test(t)) return true;              /* $59.9 */
+  if(/^\d+(?:[.,]\d{1,3})?\s*(?:(?:s\s*)?[\$₫]|sgd|usd)$/i.test(t)) return true;  /* 59.9$ */
+  if(/^\d{1,4}[.,]\d{1,2}$/.test(t)) return true;                                 /* 59.9  */
+  if(/^\d{1,4}$/.test(t)) return true;                                            /* 58    */
+  return false;   /* số dài 5+ chữ số trần = sđt / mã bưu chính, KHÔNG phải giá */
 }
 /* dòng có nhãn (sđt, đ/c, ngày giao…) — không phải tên món */
 const LABEL_RE = /^(?:s[đd]t|so\s*dien|số\s*điện|phone|tel|hp|[đd]\s*t\b|mobile|contact|[đd]\s*\/?\s*c\b|địa\s*chỉ|dia\s*chi|address|addr|ngay|ngày|order|deliver|ship|phí|phi|free\s*?ship|đã|da\s|chưa|c[oọ]c|deposit|t[oổ]ng|total|subtotal|grand|th[aà]nh\s*ti[eề]n|paynow|pay\s*now)/i;
