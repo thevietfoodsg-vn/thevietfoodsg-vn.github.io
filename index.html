@@ -2189,9 +2189,12 @@ function cancelDialog(id){
 function loadImg(src){
   return new Promise(res=>{
     if(!src) return res(null);
+    let done = false;
+    const fin = v=>{ if(!done){ done = true; res(v); } };
     const im = new Image();
-    im.onload = ()=> res(im);
-    im.onerror = ()=> res(null);
+    im.onload = ()=> fin(im);
+    im.onerror = ()=> fin(null);
+    setTimeout(()=> fin(null), 6000);   /* ảnh không tải nổi thì đừng treo nút */
     im.src = src;
   });
 }
@@ -2205,11 +2208,15 @@ async function billImage(o){
   const [logo, qr] = await Promise.all([loadImg(brandLogo(o.brand)),
                                         loadImg(o.pay !== "da" ? brandQR(o.brand) : "")]);
 
+  /* Khung vẽ phải co giãn theo số món — đơn nhiều món mà khung cố định
+     thì bill vẽ tràn ra ngoài, ảnh ra trắng hoặc hỏng, không lưu được. */
+  const nRows = (o.items || []).length + (o.returns || []).length;
+  const CH = Math.min(6000, Math.max(1600, 1100 + nRows * 110 + (o.note ? 160 : 0)));
   const cv = document.createElement("canvas");
-  cv.width = W * S; cv.height = 2600 * S;
+  cv.width = W * S; cv.height = Math.round(CH * S);
   const c = cv.getContext("2d");
   c.scale(S, S);
-  c.fillStyle = "#ffffff"; c.fillRect(0, 0, W, 2600);
+  c.fillStyle = "#ffffff"; c.fillRect(0, 0, W, CH);
   c.textBaseline = "top";
 
   const SANS = '"Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -2330,9 +2337,9 @@ async function billImage(o){
   (bi.pages||[]).forEach(p=>{ c.fillText(p, W/2, y); y += 17; });
   y += PAD;
 
-  /* cắt đúng chiều cao đã dùng */
+  /* cắt đúng chiều cao đã dùng — không được vượt khung đã vẽ */
   const out = document.createElement("canvas");
-  out.width = W * S; out.height = Math.round(y * S);
+  out.width = W * S; out.height = Math.round(Math.min(y, CH) * S);
   const oc = out.getContext("2d");
   oc.fillStyle = "#ffffff"; oc.fillRect(0, 0, out.width, out.height);
   oc.drawImage(cv, 0, 0);
@@ -2363,20 +2370,24 @@ async function saveBillImage(o, btn){
     const name = "Bill-" + orderCode(o).replace("#","") + "-"
       + (o.customer || "khach").replace(/[^\p{L}\p{N}]+/gu, "-").slice(0, 24) + ".png";
     let dl = null;
-    try{ dl = await window.claude.use("downloads"); }catch(e){}
-    if(dl){
+    try{ dl = window.claude && window.claude.use ? await window.claude.use("downloads") : null; }catch(e){}
+    if(dl && blob){
       await dl.save({filename:name, data:blob});
       toast("Đã lưu ảnh bill — gửi cho khách được rồi");
       return;
     }
     /* không tải thẳng được thì hiện ảnh ra, nhấn giữ để lưu */
-    showBillImage(cv.toDataURL("image/png"), o);
+    let url = "";
+    try{ url = cv.toDataURL("image/png"); }catch(e){ url = ""; }
+    if((!url || url.length < 200) && blob && window.URL && URL.createObjectURL) url = URL.createObjectURL(blob);
+    if(!url || url.length < 200){ toast("Máy không tạo được ảnh (bill quá dài) — dùng nút In / Lưu PDF hoặc Chép bill"); return; }
+    showBillImage(url, o);
   }catch(err){
     const code = err && err.code;
     if(code === "declined") toast("Chưa lưu — bấm đồng ý khi app hỏi");
     else if(code === "rate_limited") toast("Đang có hộp thoại lưu khác, thử lại sau vài giây");
     else if(code === "too_large") toast("Ảnh lớn quá");
-    else toast("Không lưu được ảnh — dùng nút Chép bill");
+    else toast("Không lưu được ảnh: " + ((err && err.message) || "lỗi lạ") + " — dùng nút Chép bill");
   }finally{
     if(btn){ btn.disabled = false; btn.textContent = "💾 Lưu ảnh bill"; }
   }
