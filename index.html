@@ -237,6 +237,13 @@ dialog::backdrop{background:rgba(10,18,15,.55)}
 .dlg-b{padding:16px 18px; overflow-y:auto; flex:1 1 auto; min-height:0; overscroll-behavior:contain}
 .dlg-f{position:sticky; bottom:0; background:var(--surface); padding:12px 18px calc(14px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); display:flex; gap:8px}
 .dlg-f .btn{flex:1; min-width:0; white-space:nowrap; min-height:46px}
+/* danh sách soạn đơn theo khách */
+.pickrow{padding:12px 0; border-bottom:1px solid var(--line)}
+.pickrow:last-child{border-bottom:0}
+.pickrow .pr-h{display:flex; justify-content:space-between; align-items:baseline; gap:10px}
+.pickrow .pr-h b{font-size:15px; font-weight:700}
+.pickrow .pr-s{font-size:11.5px; color:var(--ink-3); margin-top:2px}
+.pickrow .tbl td{padding:3px 0; font-size:13px}
 /* thanh dưới có 3 nút: 2 nút phụ nhỏ lại, nút chính (nút cuối) to gấp đôi */
 .dlg-f .btn.ghost{flex:0 1 auto; padding-left:10px; padding-right:10px; font-size:13.5px}
 .dlg-f .btn:last-child{flex:2 1 auto}
@@ -2529,7 +2536,7 @@ function viewPrep(){
   const chips = [["left","Tất cả chưa soạn"],["today","Cần soạn hôm nay"],["tmr","Ngày mai"],["du","Đã soạn xong"]];
 
   $("#v-prep").innerHTML =
-    '<button class="btn ghost" id="openManifest" style="margin-bottom:12px">📦 Phiếu xuất hàng theo ngày</button>'
+    '<button class="btn" id="openManifest" style="margin-bottom:12px">📋 Danh sách soạn đơn theo ngày giao</button>'
     + '<div class="statgrid" style="margin-bottom:14px">'
     + '<div class="stat"><div class="k">Đơn chưa soạn</div><div class="v mono">'+toPrep().length+'</div><div class="sub">trên tất cả các ngày</div></div>'
     + '<div class="stat'+(shortList.length?" alert":"")+'"><div class="k">Mặt hàng thiếu</div><div class="v mono">'+shortList.length+'</div><div class="sub">'+(shortList.length?"cần mua gấp":"kho đủ hàng")+'</div></div>'
@@ -2560,16 +2567,34 @@ function viewPrep(){
 
 /* ---- PHIẾU XUẤT HÀNG: gom nhiều ngày thành một chuyến ---- */
 let MF = {from:"", to:"", brand:"all"};
+/* lấy mã bưu chính 6 số trong địa chỉ */
+function postcodeOf(a){
+  const m = String(a||"").match(/(?:^|[^\d])(\d{6})(?![\d])/);
+  return m ? m[1] : "";
+}
+/* một dòng khách cho danh sách soạn đơn:
+   Tên · SĐT · Postcode · Món × SL · Tổng                                  */
+function pickRows(list){
+  return (list||[]).map(o=>({
+    o, name: o.customer || "Khách lẻ", phone: o.phone || "",
+    post: postcodeOf(o.address), code: orderCode(o),
+    items: (o.items||[]).map(i=>({name:i.name, qty:i.qty, unit:i.unit||""})),
+    total: orderNet(o), paid: o.pay === "da", prep: o.prep || "chua"
+  }));
+}
 function manifestData(){
   const from = MF.from, to = MF.to;
   const list = DB.orders.filter(o=> o.status!=="huy" && o.date >= from && o.date <= to
       && (MF.brand==="all" || o.brand===MF.brand))
     .sort((a,b)=> (a.date+(a.time||"99")).localeCompare(b.date+(b.time||"99")));
   const byItem = {};
+  /* gộp theo TÊN món, không theo mã — cùng "Phí giao hàng" ở nhiều đơn
+     phải cộng lại thành một dòng, không tách ra nhiều dòng trùng tên. */
   list.forEach(o=> orderParts(o).forEach(p=>{
-    byItem[p.sku] = byItem[p.sku] || {name:p.name, unit:p.unit, qty:0, kg:0};
-    byItem[p.sku].qty = +(byItem[p.sku].qty + p.qty).toFixed(2);
-    byItem[p.sku].kg  = +(byItem[p.sku].kg + p.qty*(p.kg||0)).toFixed(2);
+    const k = norm(p.name) + "|" + (p.unit || "");
+    byItem[k] = byItem[k] || {name:p.name, unit:p.unit, qty:0, kg:0};
+    byItem[k].qty = +(byItem[k].qty + p.qty).toFixed(2);
+    byItem[k].kg  = +(byItem[k].kg + p.qty*(p.kg||0)).toFixed(2);
   }));
   const items = Object.keys(byItem).map(k=>byItem[k]).sort((a,b)=> b.kg - a.kg || a.name.localeCompare(b.name,"vi"));
   return {
@@ -2581,20 +2606,25 @@ function manifestData(){
 }
 function manifestText(){
   const d = manifestData();
-  const L = ["📦 PHIẾU XUẤT HÀNG", viDateFull(MF.from) + " → " + viDateFull(MF.to) + (MF.brand==="all"?"":" · "+MF.brand), "——————————"];
+  const L = ["📋 DANH SÁCH SOẠN ĐƠN", viDateFull(MF.from) + " → " + viDateFull(MF.to) + (MF.brand==="all"?"":" · "+MF.brand), "——————————"];
   L.push("Tổng: " + d.list.length + " đơn · " + kgTxt(d.kg) + " · " + money(d.money));
   L.push("");
   L.push("HÀNG CẦN XUẤT");
   d.items.forEach(i=> L.push("• " + i.name + " — " + i.qty + " " + i.unit + (i.kg ? " (" + kgTxt(i.kg) + ")" : "")));
   L.push("");
-  L.push("ĐƠN GIAO");
-  d.list.forEach(o=> L.push("• " + orderCode(o) + " " + (o.customer||"Khách lẻ") + " — " + kgTxt(orderKg(o)) + " — " + money(orderNet(o)) + (o.pay==="da"?" ✓ đã thu":" ⚠ chưa thu") + (o.address ? "\n   " + o.address : "")));
+  L.push("SOẠN ĐƠN THEO KHÁCH");
+  pickRows(d.list).forEach((r,n)=>{
+    L.push("");
+    L.push((n+1) + ". " + r.name + " — " + (r.phone||"—") + " — " + (r.post||"—") + " — " + r.code);
+    r.items.forEach(i=> L.push("   • " + i.name + " × " + i.qty + (i.unit ? " " + i.unit : "")));
+    L.push("   Tổng: " + money(r.total) + (r.paid ? " ✓ đã thu" : " ⚠ chưa thu"));
+  });
   return L.join("\n");
 }
 function manifestHTML(){
   const d = manifestData();
   return '<div class="bill">'
-    + '<div class="bh"><b>PHIẾU XUẤT HÀNG</b><span>'+viDateFull(MF.from)+' → '+viDateFull(MF.to)+(MF.brand==="all"?"":" · "+esc(MF.brand))+'</span></div>'
+    + '<div class="bh"><b>DANH SÁCH SOẠN ĐƠN</b><span>'+viDateFull(MF.from)+' → '+viDateFull(MF.to)+(MF.brand==="all"?"":" · "+esc(MF.brand))+'</span></div>'
     + '<hr>'
     + '<div class="kv"><span>Số đơn</span><span>'+d.list.length+'</span></div>'
     + '<div class="kv"><span>Tổng cân nặng</span><span>'+kgTxt(d.kg)+'</span></div>'
@@ -2604,9 +2634,12 @@ function manifestHTML(){
     + '<table><tr><th>Hàng cần xuất</th><th>SL</th><th>Ký</th></tr>'
     + d.items.map(i=>'<tr><td>'+esc(i.name)+'</td><td>'+i.qty+' '+esc(i.unit)+'</td><td>'+(i.kg?kgTxt(i.kg):'—')+'</td></tr>').join("")
     + '</table><hr>'
-    + '<table><tr><th>Đơn giao</th><th>Ký</th><th>Tiền</th></tr>'
-    + d.list.map(o=>'<tr><td>'+orderCode(o)+' '+esc(o.customer||"Khách lẻ")+(o.address?'<br><span style="color:#6b6a66">'+esc(o.address)+'</span>':'')+'</td>'
-      + '<td>'+kgTxt(orderKg(o))+'</td><td>'+money(orderNet(o))+(o.pay==="da"?'':'<br><span style="color:#b23a2e">chưa thu</span>')+'</td></tr>').join("")
+    + '<table><tr><th>Khách</th><th>SĐT · Postcode</th><th>Món · SL</th><th>Tổng</th></tr>'
+    + pickRows(d.list).map(r=>'<tr>'
+      + '<td>'+esc(r.name)+'<br><span style="color:#6b6a66">'+r.code+'</span></td>'
+      + '<td>'+esc(r.phone||"—")+'<br><span style="color:#6b6a66">'+esc(r.post||"—")+'</span></td>'
+      + '<td>'+(r.items.length ? r.items.map(i=>esc(i.name)+' × '+i.qty+(i.unit?' '+esc(i.unit):'')).join("<br>") : "—")+'</td>'
+      + '<td>'+money(r.total)+(r.paid?'':'<br><span style="color:#b23a2e">chưa thu</span>')+'</td></tr>').join("")
     + '</table></div>';
 }
 
@@ -2637,16 +2670,24 @@ function manifestDialog(){
     ${d.items.length ? '<div class="sec-h"><h2>Hàng cần xuất</h2></div><div class="card" style="margin-bottom:16px"><table class="tbl">'
       + d.items.map(i=>'<tr><td>'+esc(i.name)+'<span class="s">'+i.qty+' '+esc(i.unit)+'</span></td><td class="mono">'+(i.kg?kgTxt(i.kg):"—")+'</td></tr>').join("")
       + '</table></div>' : '<div class="empty" style="padding:26px"><strong>Không có đơn nào trong khoảng này</strong>Đổi ngày ở trên để xem khoảng khác.</div>'}
-    ${d.list.length ? '<div class="sec-h"><h2>Đơn trong chuyến</h2><span class="spacer"></span><span class="count">'+d.list.length+'</span></div><div class="card"><table class="tbl">'
-      + d.list.map(o=>'<tr><td>'+esc(o.customer||"Khách lẻ")+'<span class="s">'+orderCode(o)+' · '+viDate(o.date)+' · '+PREP[o.prep||"chua"]+(o.pay==="da"?"":" · chưa thu")+'</span></td>'
-        + '<td class="mono">'+kgTxt(orderKg(o))+'<span class="s">'+money(orderNet(o))+'</span></td></tr>').join("")
-      + '</table></div>' : ""}
+    ${d.list.length ? '<div class="sec-h"><h2>Soạn đơn theo khách</h2><span class="spacer"></span><span class="count">'+d.list.length+' khách</span></div>'
+      + '<div class="card" style="margin-bottom:16px">'
+      + pickRows(d.list).map(r=>
+          '<div class="pickrow">'
+          + '<div class="pr-h"><b>'+esc(r.name)+'</b><span class="mono">'+money(r.total)+'</span></div>'
+          + '<div class="pr-s">'+(r.phone?'📞 '+esc(r.phone):'📞 —')+' · 📮 '+(r.post?esc(r.post):'—')+' · '+r.code
+          + ' · '+PREP[r.prep]+(r.paid?'':' · <span style="color:var(--danger)">chưa thu</span>')+'</div>'
+          + '<table class="tbl" style="margin-top:6px">'
+          + (r.items.length ? r.items.map(i=>'<tr><td>'+esc(i.name)+'</td><td class="mono">'+i.qty+' '+esc(i.unit)+'</td></tr>').join("")
+                            : '<tr><td colspan="2" style="color:var(--ink-3)">Đơn chưa có món</td></tr>')
+          + '</table></div>').join("")
+      + '</div>' : ""}
     ${d.list.filter(o=>o.prep==="du" && o.status!=="giao" && o.status!=="xong").length
       ? '<button type="button" class="btn soft" id="m_dispatch" style="margin-top:14px">Đánh dấu '+d.list.filter(o=>o.prep==="du" && o.status!=="giao" && o.status!=="xong").length+' đơn đã soạn xong là “Đang giao”</button>' : ""}
     `;
   }
   function open(){
-    openDialog("Phiếu xuất hàng", body(), [
+    openDialog("Soạn đơn theo ngày giao", body(), [
       {label:"Chép", cls:"ghost", fn:()=>{
         if(navigator.clipboard) navigator.clipboard.writeText(manifestText()).then(()=>toast("Đã chép phiếu xuất"), ()=>toast("Không chép được"));
         return false;
