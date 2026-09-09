@@ -236,7 +236,10 @@ dialog::backdrop{background:rgba(10,18,15,.55)}
 .dlg-h, .dlg-f{flex:none}
 .dlg-b{padding:16px 18px; overflow-y:auto; flex:1 1 auto; min-height:0; overscroll-behavior:contain}
 .dlg-f{position:sticky; bottom:0; background:var(--surface); padding:12px 18px calc(14px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); display:flex; gap:8px}
-.dlg-f .btn{flex:1}
+.dlg-f .btn{flex:1; min-width:0; white-space:nowrap}
+/* thanh dưới có 3 nút: 2 nút phụ nhỏ lại, nút chính (nút cuối) to gấp đôi */
+.dlg-f .btn.ghost{flex:0 1 auto; padding-left:10px; padding-right:10px; font-size:13.5px}
+.dlg-f .btn:last-child{flex:2 1 auto}
 .x{background:var(--surface-2); border:0; width:30px; height:30px; border-radius:8px; cursor:pointer; font-size:17px; color:var(--ink-2); line-height:1}
 
 /* login */
@@ -326,7 +329,9 @@ dialog::backdrop{background:rgba(10,18,15,.55)}
 /* ---------- bill ---------- */
 #printarea{display:none}
 .bill{background:#fff; color:#12100e; border-radius:12px; padding:20px 18px; border:1px solid var(--line);
-  font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:12.5px; line-height:1.55}
+  font-family:"Be Vietnam Pro", system-ui, sans-serif; font-size:12.5px; line-height:1.55}
+/* chỉ CỘT TIỀN mới dùng font số — font đó không ghép được dấu tiếng Việt */
+.bill table td:last-child, .bill .tot span:last-child{font-family:"IBM Plex Mono", ui-monospace, monospace}
 .bill .bh{text-align:center; margin-bottom:14px}
 .bill .bh b{display:block; font-family:"Be Vietnam Pro", sans-serif; font-size:17px; font-weight:800; letter-spacing:-.01em}
 .bill .bh span{display:block; font-size:10.5px; color:#6b6a66; margin-top:2px}
@@ -2402,7 +2407,7 @@ async function saveBillImage(o, btn){
     else if(code === "too_large") toast("Ảnh lớn quá");
     else toast("Không lưu được ảnh: " + ((err && err.message) || "lỗi lạ") + " — dùng nút Chép bill");
   }finally{
-    if(btn){ btn.disabled = false; btn.textContent = "💾 Lưu ảnh bill"; }
+    if(btn){ btn.disabled = false; btn.textContent = "💾 Lưu ảnh"; }
   }
 }
 
@@ -2413,20 +2418,26 @@ function billDialog(id){
     + '<button type="button" class="lng'+(billLang(o)==="vi"?" on":"")+'" data-lang="vi">🇻🇳 Tiếng Việt</button>'
     + '<button type="button" class="lng'+(billLang(o)==="en"?" on":"")+'" data-lang="en">🇸🇬 English</button>'
     + '</div>'
+    + '<div class="note" style="margin-bottom:12px;border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)">'
+    + 'Bấm <b>💾 Lưu ảnh</b> ở thanh dưới cùng màn hình → ảnh hiện ra → <b>nhấn giữ vào ảnh</b> → <b>Lưu vào ảnh</b> → gửi cho khách.</div>'
     + '<div id="billbox">' + billHTML(o) + '</div>'
-    + '<button type="button" class="btn" id="b_img" style="margin-top:14px">💾 Lưu ảnh bill</button>'
-    + '<div class="note" style="margin-top:10px">Bấm <b>Lưu ảnh bill</b> rồi gửi ảnh đó cho khách qua Messenger, WhatsApp hay Zalo. Muốn in ra giấy thì bấm <b>In / Lưu PDF</b>. Muốn gửi bằng chữ thì bấm <b>Chép bill</b>.</div>', [
-    {label:"Chép bill", cls:"ghost", fn:()=>{
+    + '<div class="note" style="margin-top:10px">Muốn gửi bằng chữ thì bấm <b>Chép bill</b>. Muốn in ra giấy thì bấm <b>In</b>. Hai nút đó cũng ở thanh dưới.</div>', [
+    {label:"📋 Chép", cls:"ghost", fn:()=>{
       const t = billText(o);
       if(navigator.clipboard) navigator.clipboard.writeText(t).then(()=>toast("Đã chép bill — dán vào chat gửi khách"), ()=>toast("Không chép được"));
       else toast("Không chép được");
       return false;
     }},
-    {label:"In / Lưu PDF", cls:"", fn:()=>{
+    {label:"🖨 In", cls:"ghost", fn:()=>{
       const pa = document.getElementById("printarea");
       pa.innerHTML = billHTML(o);
       try{ window.print(); }
       catch(e){ toast("Trình duyệt chặn in — dùng nút Chép bill"); }
+      return false;
+    }},
+    {label:"💾 Lưu ảnh", cls:"", fn:()=>{
+      const fb = document.querySelector('#dlgFoot [data-a="2"]');
+      saveBillImage(o, fb);
       return false;
     }}
   ]);
