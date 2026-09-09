@@ -918,9 +918,15 @@ function splitAgent(s){
   const t = String(s||"").trim();
   /* nhận mã tối đa 7 ký tự chữ-số, hoặc dài hơn nhưng có chứa mã page đã biết */
   function ok(raw){
-    const code = raw.trim().toUpperCase().replace(/\s+/g,"");
+    const asIs = raw.trim();
+    const code = asIs.toUpperCase().replace(/\s+/g,"");
     const bare = code.replace(/[^A-Z0-9]/g,"");
     if(!bare) return null;
+    /* Chỉ coi là MÃ khi nhân viên viết IN HOA (MT · CL · TH-DINH · MT- VSF),
+       hoặc có chứa mã page đã biết. "Vi - Angelina Tran" → Angelina Tran là
+       TÊN KHÁCH, không phải mã, nên không tách.                            */
+    const looksLikeCode = /^[A-Z0-9\s\-–—]+$/.test(asIs) || !!brandFromAgent(code);
+    if(!looksLikeCode) return null;
     return (bare.length <= 7 || brandFromAgent(code)) ? code : null;
   }
   let m = t.match(/^(.+?)\s*[-–—\/|]\s*([A-Za-z0-9\s\-–—]{1,16})$/);
