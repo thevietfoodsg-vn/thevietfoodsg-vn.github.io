@@ -1492,7 +1492,11 @@ function orderForm(id){
     </div>
     <div class="two">
       <div class="field"><label>Điện thoại</label><input id="f_phone" inputmode="tel" value="${esc(d.phone)}" placeholder="9123 4567"></div>
-      <div class="field"><label>Ngày giao</label><input type="date" id="f_date" value="${d.date}"></div>
+      <div class="field"><label>📅 Ngày giao</label><input type="date" id="f_date" value="${d.date}"></div>
+    </div>
+    <div class="two">
+      <div class="field"><label>Ngày order</label><input type="date" id="f_odate" value="${d.odate||""}"></div>
+      <div class="field"><label>🕐 Giờ giao</label><input type="time" id="f_time" value="${d.time}"></div>
     </div>
     <div id="custhint"></div>
     <div class="field"><label>Địa chỉ giao</label>
@@ -1543,12 +1547,8 @@ function orderForm(id){
     <div class="field"><label>Ghi chú</label><textarea id="f_note" placeholder="Ít cay, giao trước 6h…">${esc(d.note)}</textarea></div>
 
     <details style="margin-bottom:4px">
-      <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--accent)">⚙️ Thêm chi tiết — ngày order, giờ giao</summary>
+      <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--accent)">⚙️ Thêm chi tiết — hình thức trả tiền, gõ nhanh nhiều món</summary>
       <div style="margin-top:12px">
-        <div class="two">
-          <div class="field"><label>Ngày order</label><input type="date" id="f_odate" value="${d.odate||""}"></div>
-          <div class="field"><label>Giờ giao</label><input type="time" id="f_time" value="${d.time}"></div>
-        </div>
         <div class="field"><label>Hình thức trả tiền</label><select id="f_method">${METHOD.map(m=>'<option'+(d.payMethod===m?" selected":"")+'>'+m+'</option>').join("")}</select></div>
         <div class="field"><label>Gõ nhanh nhiều món một lần</label>
           <textarea id="bulk" placeholder="Mỗi món một dòng:&#10;3 xoai&#10;2kg tom su"></textarea>
@@ -2105,6 +2105,9 @@ function orderDetail(id){
       <div class="field"><label>Thanh toán</label><select id="d_pay">${Object.keys(PAY).map(k=>'<option value="'+k+'"'+(o.pay===k?" selected":"")+'>'+PAY[k]+'</option>').join("")}</select></div>
       <div class="field"><label>Hình thức</label><select id="d_method">${METHOD.map(m=>'<option'+(o.payMethod===m?" selected":"")+'>'+m+'</option>').join("")}</select></div>
     </div>
+    ${o.status!=="xong" && o.status!=="huy"
+      ? '<button type="button" class="btn" id="d_done" style="width:100%;margin-bottom:8px;background:var(--accent);color:#fff">✅ Đã giao thành công</button>'
+      : (o.status==="xong" ? '<div class="note" style="margin-bottom:8px;border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)"><b>✅ Đơn đã giao xong</b>'+(o.doneAt?' · '+esc(o.doneAt):'')+(o.doneBy?' · '+esc(o.doneBy):'')+'</div>' : "")}
     <div class="btnrow" style="margin-bottom:6px">
       ${o.phone ? '<a class="btn soft sm" href="tel:'+esc(o.phone)+'" style="text-decoration:none;text-align:center">📞 Gọi khách</a>' : ""}
       ${o.address ? '<button type="button" class="btn soft sm" id="d_copy">📋 Chép địa chỉ</button>' : ""}
@@ -2127,6 +2130,18 @@ function orderDetail(id){
     }}
   ]);
 
+  const dn = document.getElementById("d_done");
+  if(dn) dn.onclick = ()=>{
+    o.status = "xong";
+    o.prep = "du";                       /* giao rồi thì chắc chắn đã soạn xong */
+    o.doneAt = nowStamp(); o.doneBy = WHO;
+    mergeUp(DB.orders, o, "id"); pushOutbox("order", o); save(); renderAll();
+    const con = orderNet(o) - (o.deposit || 0);
+    closeDialog();
+    toast(o.pay === "da"
+      ? "✅ Đã giao xong " + orderCode(o)
+      : "✅ Đã giao xong " + orderCode(o) + " — CÒN PHẢI THU " + mny(o, con) + ", nhớ cập nhật Thanh toán");
+  };
   const cp = document.getElementById("d_copy");
   if(cp) cp.onclick = ()=>{ navigator.clipboard && navigator.clipboard.writeText(o.address); toast("Đã chép địa chỉ"); };
   const bl = document.getElementById("d_bill");
