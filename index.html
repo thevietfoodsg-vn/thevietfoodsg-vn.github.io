@@ -1053,11 +1053,12 @@ function parseItemSeg(seg){
   s = (s.slice(0, pr.index) + " " + s.slice(pr.index + pr.text.length)).replace(/\s+/g, " ").trim();
   /* Nhân viên hay ghi phép tính phía sau: "$45,9 x 2 = $91,80 - 5% = $87.2".
      Cắt bỏ từ dấu "=" trở đi, nhưng giữ lại phần trăm giảm làm ghi chú.   */
+  let pctHint = 0;
   const eq = s.indexOf("=");
   if(eq > -1){
     const tail = s.slice(eq);
     const pc = tail.match(/(\d+(?:[.,]\d+)?)\s*%/);
-    if(pc) note = (note ? note + " " : "") + "khách ghi giảm " + pc[1] + "%";
+    if(pc) pctHint = num(pc[1]);      /* chỉ để nhắc nhân viên, KHÔNG in lên bill khách */
     s = s.slice(0, eq).trim();
   }
   s = s.replace(/^[-–—:,x×\s]+/, "").replace(/[-–—:,\s]+$/, "").trim();
@@ -1077,7 +1078,9 @@ function parseItemSeg(seg){
     return {name:"Phí giao hàng", qty:1, unit:"đơn", price:pr.value, note:note};
   const su = qty ? splitUnit(s) : {name:s, unit:""};
   const nm = su.name.charAt(0).toUpperCase() + su.name.slice(1);
-  return {name:nm, qty: qty || 1, unit:su.unit, price:pr.value, note:note};
+  const row = {name:nm, qty: qty || 1, unit:su.unit, price:pr.value, note:note};
+  if(pctHint) row.pctHint = pctHint;
+  return row;
 }
 /* "2 Cơm Tấm 36$ + 2 canh khổ qua 20$ + 10$ Ship" → 3 món riêng
    Tách cả dấu +, dấu phẩy và chữ "và" — nhưng CHỈ khi tách ra có từ 2 giá trở lên,
@@ -1282,6 +1285,10 @@ function parseOrderMsg(txt){
     const post = String(txt||"").match(/\bS?(\d{6})\b/);
     if(post){ const l = String(txt||"").split(/\r?\n/).find(x=> x.includes(post[1])); if(l) out.address = l.trim(); }
   }
+  /* khách có ghi "-5%" trong tin nhắn → chỉ NHẮC nhân viên, app không tự giảm,
+     và không in chữ đó lên bill của khách */
+  out.pctHint = 0;
+  out.lines.forEach(l=>{ if(l.pctHint > out.pctHint) out.pctHint = l.pctHint; delete l.pctHint; });
   if(out.agent) out.brand = brandFromAgent(out.agent) || "";
   /* dòng chỉ có mỗi số điện thoại thì đã lấy vào ô sđt rồi — đừng để lọt vào Ghi chú */
   const restClean = rest.filter(x=>{
@@ -2048,6 +2055,7 @@ function orderForm(id){
     if(p.pay) bits.push(PAY[p.pay] + (p.deposit ? " " + money(p.deposit) : ""));
     if(p.payMethod) bits.push(p.payMethod);
     if(p.freeship) bits.push("freeship");
+    if(p.pctHint) bits.push("khách xin giảm " + p.pctHint + "% — tự gõ vào ô Giảm % nếu đồng ý");
     toast("Đã đọc xong" + (bits.length ? " · " + bits.join(" · ") : "") + " — kiểm tra lại giúp em");
   };
   if(dp) dp.onclick = ()=> runParse(false);
