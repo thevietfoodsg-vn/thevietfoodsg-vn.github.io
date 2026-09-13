@@ -937,8 +937,20 @@ function allAgents(){
 /* "55,9" → 55.9 · "1,200" → 1200 */
 function num(s){
   let v = String(s==null?"":s).trim().replace(/\s/g,"").replace(/[^\d.,-]/g,"");
-  if(/,\d{1,2}$/.test(v) && !/\.\d/.test(v)) v = v.replace(/\./g,"").replace(",", ".");
-  else v = v.replace(/,/g,"");
+  if(!v) return 0;
+  const dots = (v.match(/\./g)||[]).length, commas = (v.match(/,/g)||[]).length;
+  if(dots && commas){
+    /* dấu nào đứng sau cùng là dấu thập phân */
+    if(v.lastIndexOf(",") > v.lastIndexOf(".")) v = v.replace(/\./g,"").replace(",", ".");
+    else v = v.replace(/,/g,"");
+  }else if(dots >= 2 || /^-?\d{1,3}(\.\d{3})+$/.test(v)){
+    v = v.replace(/\./g,"");            /* 1.800.000 → 1800000 · 450.000 → 450000 */
+  }else if(commas >= 2 || /^-?\d{1,3}(,\d{3})+$/.test(v)){
+    v = v.replace(/,/g,"");              /* 1,800,000 → 1800000 */
+  }else if(commas === 1){
+    v = /,\d{1,2}$/.test(v) ? v.replace(",", ".")   /* 55,9 → 55.9 */
+                           : v.replace(/,/g,"");    /* 1,200 → 1200 */
+  }
   const n = parseFloat(v);
   return isNaN(n) ? 0 : n;
 }
@@ -1013,12 +1025,15 @@ function allGroups(){
    Nhận cả 3 kiểu nhân viên hay gõ:  "$36"  ·  "36$"  ·  "36 sgd"  ·  "S$36"      */
 /* lưu ý: kiểu "36$" không được ăn nhầm chữ số của kiểu "$68" đứng ngay sau
    (vd "1 Combo 2 $68" — "2 $" không phải giá) → chặn bằng (?!\s*\d) */
-const PRICE_RE = /(?:s\s*)?[\$₫]\s*(\d+(?:[.,]\d{1,3})?)|(\d+(?:[.,]\d{1,3})?)\s*(?:(?:s\s*)?[\$₫]|sgd|usd)(?!\s*[\d.,])/i;
+const PRICE_RE = /(?:s\s*)?[\$₫]\s*(\d+(?:[.,]\d+)*)|(\d+(?:[.,]\d+)*)\s*(?:(?:s\s*)?[\$₫]|sgd|usd|vn[dđ]|đ)(?![\p{L}\d.,])|(\d{1,3}(?:\.\d{3})+)(?![\d.,])/iu;
+/* địa chỉ Việt Nam — nhận ra để đừng biến thành tên món */
+const VN_ADDR_RE = /(phuong|quan\s|quan\d|huyen|\bxa\s|thi tran|tinh\s|thanh pho|\btp\b|hcm|ha noi|da nang|can tho|duong\s|so nha|\bngo\s|\bhem\s|\bap\s|\bto\s\d)/;
 function hasPrice(s){ return PRICE_RE.test(String(s||"")); }
 function priceFind(s){
   const m = String(s||"").match(PRICE_RE);
   if(!m) return null;
-  return {value: num(m[1] != null ? m[1] : m[2]), text: m[0], index: m.index};
+  const raw = m[1] != null ? m[1] : (m[2] != null ? m[2] : m[3]);
+  return {value: num(raw), text: m[0], index: m.index};
 }
 /* dòng tổng kết — không phải món */
 const NOT_ITEM_RE = /^(?:t[oổ]ng|total|subtotal|grand|th[aà]nh\s*ti[eề]n|c[oò]n\s*l[aạ]i|s[oố]\s*ti[eề]n|amount|đã\s*tr[aả]|ph[aả]i\s*thu)/i;
@@ -1080,6 +1095,7 @@ function isPriceOnly(s){
   if(/^(?:s\s*)?[\$₫]\s*\d+(?:[.,]\d{1,3})?$/i.test(t)) return true;              /* $59.9 */
   if(/^\d+(?:[.,]\d{1,3})?\s*(?:(?:s\s*)?[\$₫]|sgd|usd)$/i.test(t)) return true;  /* 59.9$ */
   if(/^\d{1,4}[.,]\d{1,2}$/.test(t)) return true;                                 /* 59.9  */
+  if(/^\d{1,3}(?:[.,]\d{3})+$/.test(t)) return true;                              /* 1.800.000 */
   if(/^\d{1,4}$/.test(t)) return true;                                            /* 58    */
   return false;   /* số dài 5+ chữ số trần = sđt / mã bưu chính, KHÔNG phải giá */
 }
@@ -1181,7 +1197,8 @@ function parseOrderMsg(txt){
       addrMode = false; return;
     }
     /* địa chỉ viết trần, không có chữ "Đ/c" — nhận ra nhờ mã bưu chính 6 số */
-    if(!out.address && /(?:^|[^\d])\d{6}(?![\d])/.test(line) && /\p{L}/u.test(line) && !hasPrice(line)){
+    if(!out.address && /\p{L}/u.test(line) && !hasPrice(line)
+       && ( /(?:^|[^\d])\d{6}(?![\d])/.test(line) || VN_ADDR_RE.test(norm(line)) )){
       /* KHÔNG bật addrMode: dòng này không có nhãn "Đ/c", dòng kế tiếp
          thường đã là món — bật lên là nuốt luôn món vào địa chỉ. */
       out.address = line.replace(/^[-•*\s]+/, "").trim(); addrMode = false; return;
@@ -1208,7 +1225,7 @@ function parseOrderMsg(txt){
     }
     /* món ghi thiếu giá: "2 canh khổ qua" → vẫn nhận thành món, giá 0 để nhân viên điền
        (thà để nhân viên gõ giá còn hơn nuốt mất món khách đã đặt) */
-    if(!addrMode && !LABEL_RE.test(line)
+    if(!addrMode && !LABEL_RE.test(line) && !VN_ADDR_RE.test(norm(line))
        && /^(?:[-•*]\s*)?\d+(?:[.,]\d+)?\s+\p{L}{2}/u.test(line)
        && !/\d{1,2}\s*[\/\-.]\s*\d{1,2}\s*[\/\-.]\s*\d{2}/.test(line)){
       const g = parseItemSeg(line + " $0");
