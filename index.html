@@ -1027,7 +1027,9 @@ function allGroups(){
    (vd "1 Combo 2 $68" — "2 $" không phải giá) → chặn bằng (?!\s*\d) */
 const PRICE_RE = /(?:s\s*)?[\$₫]\s*(\d+(?:[.,]\d+)*)|(\d+(?:[.,]\d+)*)\s*(?:(?:s\s*)?[\$₫]|sgd|usd|vn[dđ]|đ)(?![\p{L}\d.,])|(\d{1,3}(?:\.\d{3})+)(?![\d.,])/iu;
 /* địa chỉ Việt Nam — nhận ra để đừng biến thành tên món */
-const VN_ADDR_RE = /(phuong|quan\s|quan\d|huyen|\bxa\s|thi tran|tinh\s|thanh pho|\btp\b|hcm|ha noi|da nang|can tho|duong\s|so nha|\bngo\s|\bhem\s|\bap\s|\bto\s\d)/;
+/* Chỉ nhận những chữ CHẮC CHẮN là địa chỉ. Cố tình bỏ "đường", "xã", "ngò",
+   "ấp", "tổ" vì trùng với tên món: sữa có ĐƯỜNG, XÁ lách, rau NGÒ… */
+const VN_ADDR_RE = /(phuong\s*\d|phuong\s+[a-z]|quan\s*\d|\bq\.\s*\d|huyen\s|thi tran|tinh\s|thanh pho|\btp\.?\s*h|\bhcm\b|ha noi|da nang|can tho|so nha)/;
 function hasPrice(s){ return PRICE_RE.test(String(s||"")); }
 function priceFind(s){
   const m = String(s||"").match(PRICE_RE);
@@ -1081,11 +1083,12 @@ function parseItemSeg(seg){
    Tách cả dấu +, dấu phẩy và chữ "và" — nhưng CHỈ khi tách ra có từ 2 giá trở lên,
    để không cắt nhầm ghi chú hay địa chỉ.                                        */
 function splitSegs(line){
-  /* giữ dấu phẩy thập phân ($45,9) lại, đừng cắt ngay giữa số tiền */
-  const keep = String(line||"").replace(/(\d)\s*,\s*(\d)/g, "$1$2");
-  const parts = keep.split(/\s*\+\s*|\s*,\s*|\s+v[aà]\s+/i).map(x=> x.replace(//g, ","));
+  /* Chỉ giữ dấu phẩy THẬP PHÂN ($45,9 — không có khoảng trắng).
+     Dấu phẩy ngăn giữa hai món ("$36, 2 canh khổ qua $20") vẫn cắt bình thường. */
+  const keep = String(line||"").replace(/(\d),(\d{1,3})(?!\d)/g, "$1$2");
+  const parts = keep.split(/\s*\+\s*|\s*,\s*|\s+v[aà]\s+/i);
   if(parts.length < 2) return [line];
-  let n = 0; parts.forEach(p=>{ if(hasPrice(p)) n++; });
+  let n = 0; parts.forEach(x=>{ if(hasPrice(x)) n++; });
   return n >= 2 ? parts : [line];
 }
 /* dòng chỉ có mỗi con số tiền: "$59.9" · "59,9" · "59.9$" */
@@ -1098,6 +1101,14 @@ function isPriceOnly(s){
   if(/^\d{1,3}(?:[.,]\d{3})+$/.test(t)) return true;                              /* 1.800.000 */
   if(/^\d{1,4}$/.test(t)) return true;                                            /* 58    */
   return false;   /* số dài 5+ chữ số trần = sđt / mã bưu chính, KHÔNG phải giá */
+}
+/* dòng chỉ toàn số tiền và phép tính, không có chữ — là GIÁ của món dòng trên
+   vd: "$45,9 x 2  = $91,80-5% =$87.2"                                        */
+function isPriceLine(s){
+  const t = String(s||"");
+  if(!hasPrice(t)) return false;
+  const chu = t.replace(/[x×]/gi, "").match(/\p{L}/gu);
+  return !chu || chu.length < 2;
 }
 /* dòng có nhãn (sđt, đ/c, ngày giao…) — không phải tên món */
 const LABEL_RE = /^(?:s[đd]t|so\s*dien|số\s*điện|phone|tel|hp|[đd]\s*t\b|mobile|contact|[đd]\s*\/?\s*c\b|địa\s*chỉ|dia\s*chi|address|addr|ngay|ngày|order|deliver|ship|phí|phi|free\s*?ship|đã|da\s|chưa|c[oọ]c|deposit|t[oổ]ng|total|subtotal|grand|th[aà]nh\s*ti[eề]n|paynow|pay\s*now)/i;
@@ -1123,8 +1134,9 @@ function parseOrderMsg(txt){
   const rows = [];
   for(let i = 0; i < src.length; i++){
     const cur = String(src[i]).trim(), nxt = i + 1 < src.length ? String(src[i+1]).trim() : "";
-    if(nxt && isPriceOnly(nxt) && /\p{L}/u.test(cur) && !hasPrice(cur)
-       && !LABEL_RE.test(cur) && !NOT_ITEM_RE.test(cur)){
+    if(nxt && (isPriceOnly(nxt) || isPriceLine(nxt)) && /\p{L}/u.test(cur) && !hasPrice(cur)
+       && !LABEL_RE.test(cur) && !NOT_ITEM_RE.test(cur)
+       && !VN_ADDR_RE.test(norm(cur)) && !/(?:^|[^\d])\d{6}(?![\d])/.test(cur)){
       rows.push(cur + " " + nxt); i++; continue;
     }
     rows.push(src[i]);
@@ -1141,10 +1153,10 @@ function parseOrderMsg(txt){
       addrMode = false; return;
     }
     /* nhãn tiếng Anh: Order: 2/9/2026 · Delivery: 2/9/2026 */
-    if((m = line.match(/^(?:order(?:\s*date)?|ordered|đặt\s*ngày)\s*[:.\-]\s*(.+)$/i))){
+    if((m = line.match(/^(?:order(?:\s*date)?|ordered|đặt\s*ngày|ngày\s*đặt|đặt)\s*[:.\-]?\s*(\d{1,2}\s*[\/\-.].+)$/i))){
       out.odate = parseVNDate(m[1]); addrMode = false; return;
     }
-    if((m = line.match(/^(?:deliver(?:y|ed)?(?:\s*date)?|ship(?:ping)?\s*date|giao\s*ngày)\s*[:.\-]\s*(.+)$/i))){
+    if((m = line.match(/^(?:deliver(?:y|ed)?(?:\s*date)?|ship(?:ping)?\s*date|giao\s*ngày|ngày\s*giao|giao)\s*[:.\-]?\s*(\d{1,2}\s*[\/\-.].+)$/i))){
       out.date = parseVNDate(m[1]); addrMode = false; return;
     }
     if((m = line.match(/^(?:[đd]\s*\/?\s*c|địa\s*chỉ|dia\s*chi|address|addr)\s*[:.\-]?\s*(.+)$/i))){
