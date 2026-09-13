@@ -856,7 +856,10 @@ function checkAddress(a, brand){
     return {ok: miss.length === 0, miss, vn:true};
   }
   /* #05-67 · hoặc tầng hầm ghi kiểu B2-38A (Orchard, Marina…) không có dấu # */
-  const UNIT_RE = /#\s*\d{1,3}\s*[-–—]\s*\d{1,4}[A-Za-z]?|\bB\s*\d{1,2}\s*[-–—]\s*\d{1,4}[A-Za-z]?\b/;
+  /* Số tầng Singapore — nhận mọi kiểu nhân viên hay gõ:
+     #05-67 · #05–67 · #05/67 · #05.67 · #05 67 · #0567 · ＃05-67 (dấu # kiểu Nhật)
+     · B2-38A (tầng hầm, không có dấu #) · Unit 05-67 · Level 5-67          */
+  const UNIT_RE = /[#＃]\s*\d{1,3}\s*[-–—\/.,\s]\s*\d{1,4}\s*[A-Za-z]?|[#＃]\s*\d{4,6}[A-Za-z]?|\b(?:unit|lvl|level|tang|tầng)\s*#?\s*\d{1,3}\s*[-–—\/.\s]\s*\d{1,4}[A-Za-z]?|\bB\s*\d{1,2}\s*[-–—\/]\s*\d{1,4}[A-Za-z]?\b/i;
   if(!UNIT_RE.test(s)) miss.push("số tầng dạng #05-67");
   if(!/(?:^|[^\d])\d{6}(?![\d])/.test(s)) miss.push("mã bưu chính 6 số");
   const body = s.replace(new RegExp(UNIT_RE.source,"g"),"").replace(/\d{6}/g,"").replace(/[^\p{L}\s]/gu," ").trim();
